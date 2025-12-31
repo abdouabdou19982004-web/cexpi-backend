@@ -8,41 +8,41 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// اتصال بـ MongoDB
 mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('✅ Connected to MongoDB'))
+  .then(() => console.log('✅ Connected to MongoDB Atlas'))
   .catch(err => console.log('❌ MongoDB error:', err));
 
-// User and Listing models (same as before)
+// نموذج المستخدم
 const UserSchema = new mongoose.Schema({
-  piUid: String,
-  piUsername: String,
-  country: String,
-  phoneNumber: String,
+  piUid: { type: String, required: true, unique: true },
+  piUsername: { type: String, required: true },
+  country: { type: String, required: true },
   createdAt: { type: Date, default: Date.now }
 });
 const User = mongoose.model('User', UserSchema);
 
+// نموذج الإعلان
 const ListingSchema = new mongoose.Schema({
-  sellerUid: String,
-  title: String,
-  description: String,
-  priceInPi: Number,
-  category: String,
+  sellerUid: { type: String, required: true },
+  title: { type: String, required: true },
+  description: { type: String, required: true },
+  priceInPi: { type: Number, required: true },
+  category: { type: String, required: true },
   make: String,
   model: String,
   year: Number,
   mileage: Number,
-  country: String,
-  region: String,
+  country: { type: String, required: true },
+  region: { type: String, required: true },
   images: [String],
-  phoneNumber: String,
-  paid: { type: Boolean, default: false },
-  active: { type: Boolean, default: false },
-  createdAt: { type: Date, default: Date.now }
+  phoneNumber: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+  active: { type: Boolean, default: true }
 });
 const Listing = mongoose.model('Listing', ListingSchema);
 
-// Register user
+// تسجيل المستخدم
 app.post('/api/register-user', async (req, res) => {
   const { piUid, piUsername, country } = req.body;
   if (!piUid || !piUsername || !country) return res.status(400).json({ error: 'Missing fields' });
@@ -55,7 +55,7 @@ app.post('/api/register-user', async (req, res) => {
   }
 });
 
-// Create payment (returns payment object for frontend)
+// إنشاء طلب دفع (0.5 Pi)
 app.post('/api/create-listing-payment', async (req, res) => {
   const { piUid } = req.body;
   if (!piUid) return res.status(400).json({ error: 'piUid required' });
@@ -68,49 +68,57 @@ app.post('/api/create-listing-payment', async (req, res) => {
   });
 });
 
-// Approve payment (called from frontend onReadyForServerApproval)
+// موافقة على الدفع
 app.post('/api/approve-payment', async (req, res) => {
   const { paymentId } = req.body;
-
   try {
-    await axios.post(
-      `https://api.minepi.com/v2/payments/${paymentId}/approve`,
-      {},
-      { headers: { 'Authorization': `Key ${process.env.PI_API_KEY}` } }
-    );
+    await axios.post(`https://api.minepi.com/v2/payments/${paymentId}/approve`, {}, {
+      headers: { 'Authorization': `Key ${process.env.PI_API_KEY}` }
+    });
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.response?.data || e.message });
   }
 });
 
-// Complete payment and publish listing (called from frontend onReadyForServerCompletion)
-app.post('/api/complete-payment', async (req, res) => {
-  const { paymentId, txid, listingData } = req.body;
+// إكمال الدفع ونشر الإعلان
+app.post('/api/complete-listing', async (req, res) => {
+  const { paymentId, txid, piUid, title, description, priceInPi, category, make, model, year, mileage, country, region, images, phoneNumber } = req.body;
 
   try {
-    // تأكيد الدفع لـ Pi API
-    await axios.post(
-      `https://api.minepi.com/v2/payments/${paymentId}/complete`,
-      { txid },
-      { headers: { 'Authorization': `Key ${process.env.PI_API_KEY}` } }
-    );
+    // إكمال الدفع لـ Pi
+    await axios.post(`https://api.minepi.com/v2/payments/${paymentId}/complete`, { txid }, {
+      headers: { 'Authorization': `Key ${process.env.PI_API_KEY}` }
+    });
 
-    // حفظ الإعلان بعد التأكيد الناجح
+    // حفظ الإعلان
     const listing = new Listing({
-      ...listingData,
-      paid: true,
-      active: true
+      sellerUid: piUid,
+      title, description, priceInPi, category, make, model, year, mileage,
+      country, region, images, phoneNumber
     });
     await listing.save();
 
-    res.json({ success: true, message: 'Payment completed and listing published!' });
+    res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.response?.data || e.message });
   }
 });
 
-app.get('/', (req, res) => res.send('<h1>CexPi Backend - Ready for real payments</h1>'));
+// جلب الإعلانات حسب الدولة
+app.get('/api/get-listings', async (req, res) => {
+  const { country } = req.query;
+  if (!country) return res.status(400).json({ error: 'Country required' });
+
+  try {
+    const listings = await Listing.find({ country: country.trim(), active: true }).sort({ createdAt: -1 });
+    res.json({ success: true, listings });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/', (req, res) => res.send('<h1>CexPi Backend - Running</h1>'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
