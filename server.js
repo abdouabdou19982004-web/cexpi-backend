@@ -35,8 +35,8 @@ const ListingSchema = new mongoose.Schema({
   year: { type: Number },
   mileage: { type: Number },
   country: { type: String, required: true },
-  region: { type: String, required: true }, // New: required region/city
-  images: [String], // Up to 6 images
+  region: { type: String, required: true },
+  images: [String],
   phoneNumber: { type: String, required: true },
   paid: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
@@ -72,11 +72,11 @@ app.post('/api/create-listing-payment', async (req, res) => {
   if (!piUid) return res.status(400).json({ error: 'piUid required' });
 
   try {
-    const mockPaymentId = 'list_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    const paymentId = 'list_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9); // Mock for Sandbox, real in Mainnet
 
     res.json({
       success: true,
-      paymentId: mockPaymentId,
+      paymentId,
       amount: 0.5,
       memo: `CexPi Listing Fee - 0.5 Pi - User: ${piUid}`,
       metadata: { type: 'listing_fee', piUid }
@@ -86,21 +86,43 @@ app.post('/api/create-listing-payment', async (req, res) => {
   }
 });
 
-// 3. Complete Payment and Activate Listing (after payment and form submission)
-app.post('/api/complete-listing', async (req, res) => {
-  const { piUid, title, description, priceInPi, category, make, model, year, mileage, region, images, phoneNumber } = req.body;
-
-  if (!title || !description || !priceInPi || !category || !region || !phoneNumber) {
-    return res.status(400).json({ error: 'Missing required fields: country, region, price, phone number, etc.' });
-  }
-
-  if (images.length > 6) return res.status(400).json({ error: 'Max 6 images allowed' });
+// 3. Approve Payment (called from Frontend onReadyForServerApproval)
+app.post('/api/approve-payment', async (req, res) => {
+  const { paymentId } = req.body;
 
   try {
+    const response = await axios.post(
+      `https://api.minepi.com/v2/payments/${paymentId}/approve`,
+      {},
+      {
+        headers: { 'Authorization': `Key ${process.env.PI_API_KEY}` }
+      }
+    );
+    res.json({ success: true, response: response.data });
+  } catch (error) {
+    res.status(500).json({ error: error.response ? error.response.data : error.message });
+  }
+});
+
+// 4. Complete Payment and Publish Listing (called from Frontend onReadyForServerCompletion)
+app.post('/api/complete-listing', async (req, res) => {
+  const { paymentId, title, description, priceInPi, category, make, model, year, mileage, region, images, phoneNumber, piUid } = req.body;
+
+  try {
+    // Complete the payment
+    const completeResponse = await axios.post(
+      `https://api.minepi.com/v2/payments/${paymentId}/complete`,
+      { txid: 'dummy_txid' }, // In real, get txid from frontend or Pi SDK
+      {
+        headers: { 'Authorization': `Key ${process.env.PI_API_KEY}` }
+      }
+    );
+
+    // Save listing after complete
     const listing = new Listing({
       sellerUid: piUid,
       title, description, priceInPi, category, make, model, year, mileage,
-      country: (await User.findOne({ piUid })).country, // Get country from user
+      country: (await User.findOne({ piUid })).country,
       region,
       images,
       phoneNumber,
@@ -111,11 +133,10 @@ app.post('/api/complete-listing', async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Listing published successfully!',
-      listingId: listing._id
+      message: 'Payment completed and listing published!'
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.response ? error.response.data : error.message });
   }
 });
 
