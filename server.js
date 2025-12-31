@@ -8,12 +8,11 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// اتصال بـ MongoDB
 mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('✅ Connected to MongoDB Atlas'))
+  .then(() => console.log('✅ Connected to MongoDB'))
   .catch(err => console.log('❌ MongoDB error:', err));
 
-// نموذج المستخدم
+// User Model
 const UserSchema = new mongoose.Schema({
   piUid: { type: String, required: true, unique: true },
   piUsername: { type: String, required: true },
@@ -22,7 +21,7 @@ const UserSchema = new mongoose.Schema({
 });
 const User = mongoose.model('User', UserSchema);
 
-// نموذج الإعلان
+// Listing Model
 const ListingSchema = new mongoose.Schema({
   sellerUid: { type: String, required: true },
   title: { type: String, required: true },
@@ -42,7 +41,7 @@ const ListingSchema = new mongoose.Schema({
 });
 const Listing = mongoose.model('Listing', ListingSchema);
 
-// تسجيل المستخدم
+// Register user
 app.post('/api/register-user', async (req, res) => {
   const { piUid, piUsername, country } = req.body;
   if (!piUid || !piUsername || !country) return res.status(400).json({ error: 'Missing fields' });
@@ -55,7 +54,7 @@ app.post('/api/register-user', async (req, res) => {
   }
 });
 
-// إنشاء طلب دفع (0.5 Pi)
+// Create payment request
 app.post('/api/create-listing-payment', async (req, res) => {
   const { piUid } = req.body;
   if (!piUid) return res.status(400).json({ error: 'piUid required' });
@@ -68,7 +67,7 @@ app.post('/api/create-listing-payment', async (req, res) => {
   });
 });
 
-// موافقة على الدفع
+// Approve payment
 app.post('/api/approve-payment', async (req, res) => {
   const { paymentId } = req.body;
   try {
@@ -81,12 +80,12 @@ app.post('/api/approve-payment', async (req, res) => {
   }
 });
 
-// إكمال الدفع ونشر الإعلان
+// Complete payment and publish listing
 app.post('/api/complete-listing', async (req, res) => {
   const { paymentId, txid, piUid, title, description, priceInPi, category, make, model, year, mileage, country, region, images, phoneNumber } = req.body;
 
   try {
-    // إكمال الدفع لـ Pi
+    // تأكيد إكمال الدفع لـ Pi (مهم جدًا عشان ما يبقاش معلق)
     await axios.post(`https://api.minepi.com/v2/payments/${paymentId}/complete`, { txid }, {
       headers: { 'Authorization': `Key ${process.env.PI_API_KEY}` }
     });
