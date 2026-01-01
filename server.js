@@ -8,8 +8,8 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// اتصال MongoDB مع تحقق
-mongoose.connect(process.env.MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+// اتصال بـ MongoDB بدون الخيارات القديمة (الحل للخطأ اللي ظهر في Logs)
+mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('✅ Connected to MongoDB successfully'))
   .catch(err => console.error('❌ MongoDB connection error:', err));
 
@@ -22,20 +22,20 @@ const UserSchema = new mongoose.Schema({
 });
 const User = mongoose.model('User', UserSchema);
 
-// نموذج الإعلان (مع تصحيح الحقول)
+// نموذج الإعلان
 const ListingSchema = new mongoose.Schema({
   sellerUid: { type: String, required: true },
   title: { type: String, required: true },
   description: { type: String, required: true },
   priceInPi: { type: Number, required: true },
   category: { type: String, required: true },
-  make: { type: String },
-  model: { type: String },
-  year: { type: Number },
-  mileage: { type: Number },
+  make: String,
+  model: String,
+  year: Number,
+  mileage: Number,
   country: { type: String, required: true },
   region: { type: String, required: true },
-  images: { type: [String], default: [] },
+  images: [String],
   phoneNumber: { type: String, required: true },
   createdAt: { type: Date, default: Date.now },
   active: { type: Boolean, default: true }
@@ -44,10 +44,10 @@ const Listing = mongoose.model('Listing', ListingSchema);
 
 // تسجيل المستخدم
 app.post('/api/register-user', async (req, res) => {
-  try {
-    const { piUid, piUsername, country } = req.body;
-    if (!piUid || !piUsername || !country) return res.status(400).json({ error: 'Missing fields' });
+  const { piUid, piUsername, country } = req.body;
+  if (!piUid || !piUsername || !country) return res.status(400).json({ error: 'Missing fields' });
 
+  try {
     await User.findOneAndUpdate({ piUid }, { piUsername, country }, { upsert: true, new: true });
     res.json({ success: true });
   } catch (e) {
@@ -56,7 +56,7 @@ app.post('/api/register-user', async (req, res) => {
   }
 });
 
-// إنشاء طلب دفع
+// إنشاء طلب دفع 0.5 Pi
 app.post('/api/create-listing-payment', async (req, res) => {
   const { piUid } = req.body;
   if (!piUid) return res.status(400).json({ error: 'piUid required' });
@@ -101,15 +101,15 @@ app.post('/api/complete-payment', async (req, res) => {
   }
 });
 
-// نشر الإعلان (المسار الرئيسي لزر Publish)
+// نشر الإعلان (زر Publish Listing يستخدم ده)
 app.post('/api/complete-listing', async (req, res) => {
+  const { piUid, title, description, priceInPi, category, make, model, year, mileage, country, region, images, phoneNumber } = req.body;
+
+  if (!piUid || !title || !description || !priceInPi || !category || !country || !region || !phoneNumber) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
   try {
-    const { piUid, title, description, priceInPi, category, make, model, year, mileage, country, region, images, phoneNumber } = req.body;
-
-    if (!piUid || !title || !description || !priceInPi || !category || !country || !region || !phoneNumber) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
     const newListing = new Listing({
       sellerUid: piUid,
       title,
@@ -134,7 +134,7 @@ app.post('/api/complete-listing', async (req, res) => {
   }
 });
 
-// جلب الإعلانات
+// جلب الإعلانات حسب الدولة
 app.get('/api/get-listings', async (req, res) => {
   const { country } = req.query;
   if (!country) return res.status(400).json({ error: 'Country required' });
@@ -148,6 +148,7 @@ app.get('/api/get-listings', async (req, res) => {
   }
 });
 
+// صفحة اختبار
 app.get('/', (req, res) => res.send('<h1>CexPi Backend - Running successfully</h1>'));
 
 const PORT = process.env.PORT || 3000;
