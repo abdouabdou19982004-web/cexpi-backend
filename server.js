@@ -8,7 +8,7 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// اتصال بـ MongoDB بدون الخيارات القديمة (الحل للخطأ اللي ظهر في Logs)
+// اتصال بـ MongoDB بدون خيارات قديمة
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('✅ Connected to MongoDB successfully'))
   .catch(err => console.error('❌ MongoDB connection error:', err));
@@ -56,7 +56,7 @@ app.post('/api/register-user', async (req, res) => {
   }
 });
 
-// إنشاء طلب دفع 0.5 Pi
+// إنشاء طلب دفع
 app.post('/api/create-listing-payment', async (req, res) => {
   const { piUid } = req.body;
   if (!piUid) return res.status(400).json({ error: 'piUid required' });
@@ -101,7 +101,7 @@ app.post('/api/complete-payment', async (req, res) => {
   }
 });
 
-// نشر الإعلان (زر Publish Listing يستخدم ده)
+// نشر الإعلان
 app.post('/api/complete-listing', async (req, res) => {
   const { piUid, title, description, priceInPi, category, make, model, year, mileage, country, region, images, phoneNumber } = req.body;
 
@@ -148,7 +148,23 @@ app.get('/api/get-listings', async (req, res) => {
   }
 });
 
-// صفحة اختبار
+// حذف الإعلان (جديد - فقط للمالك)
+app.post('/api/delete-listing', async (req, res) => {
+  const { listingId, piUid } = req.body;
+  if (!listingId || !piUid) return res.status(400).json({ error: 'listingId and piUid required' });
+
+  try {
+    const listing = await Listing.findOne({ _id: listingId, sellerUid: piUid });
+    if (!listing) return res.status(404).json({ error: 'Listing not found or not owned by you' });
+
+    await Listing.deleteOne({ _id: listingId });
+    res.json({ success: true, message: 'Listing deleted successfully' });
+  } catch (e) {
+    console.error('Delete listing error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/', (req, res) => res.send('<h1>CexPi Backend - Running successfully</h1>'));
 
 const PORT = process.env.PORT || 3000;
