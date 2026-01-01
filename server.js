@@ -8,7 +8,6 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// اتصال بـ MongoDB بدون خيارات قديمة
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('✅ Connected to MongoDB successfully'))
   .catch(err => console.error('❌ MongoDB connection error:', err));
@@ -134,13 +133,10 @@ app.post('/api/complete-listing', async (req, res) => {
   }
 });
 
-// جلب الإعلانات حسب الدولة
+// جلب الإعلانات (معدل ليجلب كل الإعلانات بدون شرط country)
 app.get('/api/get-listings', async (req, res) => {
-  const { country } = req.query;
-  if (!country) return res.status(400).json({ error: 'Country required' });
-
   try {
-    const listings = await Listing.find({ country, active: true }).sort({ createdAt: -1 });
+    const listings = await Listing.find({ active: true }).sort({ createdAt: -1 });
     res.json({ success: true, listings });
   } catch (e) {
     console.error(e);
@@ -148,7 +144,7 @@ app.get('/api/get-listings', async (req, res) => {
   }
 });
 
-// حذف الإعلان (جديد - فقط للمالك)
+// حذف الإعلان
 app.post('/api/delete-listing', async (req, res) => {
   const { listingId, piUid } = req.body;
   if (!listingId || !piUid) return res.status(400).json({ error: 'listingId and piUid required' });
@@ -158,14 +154,14 @@ app.post('/api/delete-listing', async (req, res) => {
     if (!listing) return res.status(404).json({ error: 'Listing not found or not owned by you' });
 
     await Listing.deleteOne({ _id: listingId });
-    res.json({ success: true, message: 'Listing deleted successfully' });
+    res.json({ success: true });
   } catch (e) {
-    console.error('Delete listing error:', e);
+    console.error(e);
     res.status(500).json({ error: e.message });
   }
 });
 
-app.get('/', (req, res) => res.send('<h1>CexPi Backend - Running successfully</h1>'));
+app.get('/', (req, res) => res.send('<h1>CexPi Backend - Running</h1>'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
