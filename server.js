@@ -5,6 +5,28 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const axios = require('axios');
+async function verifyPiToken(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    return res.status(401).json({ error: 'No authorization header' });
+  }
+
+  const token = authHeader.replace('Bearer ', '');
+
+  try {
+    const response = await axios.get(
+      'https://api.minepi.com/v2/me',
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    req.user = response.data;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid Pi token' });
+  }
+}
+
 
 /* ✅ إضافة middleware التحقق من Pi */
 const verifyPiToken = require('./middleware/verifyPiToken');
@@ -126,8 +148,9 @@ app.post('/api/complete-payment', verifyPiToken, async (req, res) => {
 
 /* نشر إعلان (محمي) */
 app.post('/api/complete-listing', verifyPiToken, async (req, res) => {
+  const piUid = req.user.uid;
   const {
-    piUid, title, description, priceInPi, category,
+    title, description, priceInPi, category,
     make, model, year, mileage,
     country, region, images, phoneNumber
   } = req.body;
@@ -198,3 +221,4 @@ app.get('/', (req, res) => {
 /* Start Server */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
