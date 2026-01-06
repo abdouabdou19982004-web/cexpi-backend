@@ -7,6 +7,12 @@ const cors = require('cors');
 const axios = require('axios');
 
 const app = express();
+app.use(helmet());
+
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100
+}));
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
@@ -167,4 +173,5 @@ app.get('/', (req, res) => res.send('<h1>CexPi Backend - Running</h1>'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
 
