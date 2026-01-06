@@ -5,22 +5,29 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const axios = require('axios');
+
+/* ✅ إضافة middleware التحقق من Pi */
 const verifyPiToken = require('./middleware/verifyPiToken');
+
 const app = express();
+
+/* ====== حماية عامة ====== */
 app.use(helmet());
 
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100
 }));
+
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+/* ====== MongoDB ====== */
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('✅ Connected to MongoDB successfully'))
   .catch(err => console.error('❌ MongoDB connection error:', err));
 
-// نموذج المستخدم
+/* ====== User Model ====== */
 const UserSchema = new mongoose.Schema({
   piUid: { type: String, required: true, unique: true },
   piUsername: { type: String, required: true },
@@ -29,7 +36,7 @@ const UserSchema = new mongoose.Schema({
 });
 const User = mongoose.model('User', UserSchema);
 
-// نموذج الإعلان
+/* ====== Listing Model ====== */
 const ListingSchema = new mongoose.Schema({
   sellerUid: { type: String, required: true },
   title: { type: String, required: true },
@@ -49,22 +56,28 @@ const ListingSchema = new mongoose.Schema({
 });
 const Listing = mongoose.model('Listing', ListingSchema);
 
-// تسجيل المستخدم
-app.post('/api/register-user', async (req, res) => {
+/* ====== Routes ====== */
+
+/* تسجيل المستخدم (محمي) */
+app.post('/api/register-user', verifyPiToken, async (req, res) => {
   const { piUid, piUsername, country } = req.body;
-  if (!piUid || !piUsername || !country) return res.status(400).json({ error: 'Missing fields' });
+  if (!piUid || !piUsername || !country)
+    return res.status(400).json({ error: 'Missing fields' });
 
   try {
-    await User.findOneAndUpdate({ piUid }, { piUsername, country }, { upsert: true, new: true });
+    await User.findOneAndUpdate(
+      { piUid },
+      { piUsername, country },
+      { upsert: true, new: true }
+    );
     res.json({ success: true });
   } catch (e) {
-    console.error(e);
     res.status(500).json({ error: e.message });
   }
 });
 
-// إنشاء طلب دفع
-app.post('/api/create-listing-payment', async (req, res) => {
+/* إنشاء طلب دفع (محمي) */
+app.post('/api/create-listing-payment', verifyPiToken, async (req, res) => {
   const { piUid } = req.body;
   if (!piUid) return res.status(400).json({ error: 'piUid required' });
 
@@ -76,43 +89,51 @@ app.post('/api/create-listing-payment', async (req, res) => {
   });
 });
 
-// موافقة على الدفع
-app.post('/api/approve-payment', async (req, res) => {
+/* الموافقة على الدفع (محمي) */
+app.post('/api/approve-payment', verifyPiToken, async (req, res) => {
   const { paymentId } = req.body;
   if (!paymentId) return res.status(400).json({ error: 'paymentId required' });
 
   try {
-    await axios.post(`https://api.minepi.com/v2/payments/${paymentId}/approve`, {}, {
-      headers: { 'Authorization': `Key ${process.env.PI_API_KEY}` }
-    });
+    await axios.post(
+      `https://api.minepi.com/v2/payments/${paymentId}/approve`,
+      {},
+      { headers: { Authorization: `Key ${process.env.PI_API_KEY}` } }
+    );
     res.json({ success: true });
   } catch (e) {
-    console.error('Approve error:', e.response?.data || e.message);
     res.status(500).json({ error: e.response?.data || e.message });
   }
 });
 
-// إكمال الدفع
-app.post('/api/complete-payment', async (req, res) => {
+/* إكمال الدفع (محمي) */
+app.post('/api/complete-payment', verifyPiToken, async (req, res) => {
   const { paymentId, txid } = req.body;
-  if (!paymentId || !txid) return res.status(400).json({ error: 'paymentId and txid required' });
+  if (!paymentId || !txid)
+    return res.status(400).json({ error: 'paymentId and txid required' });
 
   try {
-    await axios.post(`https://api.minepi.com/v2/payments/${paymentId}/complete`, { txid }, {
-      headers: { 'Authorization': `Key ${process.env.PI_API_KEY}` }
-    });
+    await axios.post(
+      `https://api.minepi.com/v2/payments/${paymentId}/complete`,
+      { txid },
+      { headers: { Authorization: `Key ${process.env.PI_API_KEY}` } }
+    );
     res.json({ success: true });
   } catch (e) {
-    console.error('Complete error:', e.response?.data || e.message);
     res.status(500).json({ error: e.response?.data || e.message });
   }
 });
 
-// نشر الإعلان
-app.post('/api/complete-listing', async (req, res) => {
-  const { piUid, title, description, priceInPi, category, make, model, year, mileage, country, region, images, phoneNumber } = req.body;
+/* نشر إعلان (محمي) */
+app.post('/api/complete-listing', verifyPiToken, async (req, res) => {
+  const {
+    piUid, title, description, priceInPi, category,
+    make, model, year, mileage,
+    country, region, images, phoneNumber
+  } = req.body;
 
-  if (!piUid || !title || !description || !priceInPi || !category || !country || !region || !phoneNumber) {
+  if (!piUid || !title || !description || !priceInPi ||
+      !category || !country || !region || !phoneNumber) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
@@ -136,43 +157,44 @@ app.post('/api/complete-listing', async (req, res) => {
     await newListing.save();
     res.json({ success: true, message: 'Listing published successfully!' });
   } catch (e) {
-    console.error('Save listing error:', e);
-    res.status(500).json({ error: e.message || 'Failed to save listing' });
-  }
-});
-
-// جلب الإعلانات (معدل ليجلب كل الإعلانات بدون شرط country)
-app.get('/api/get-listings', async (req, res) => {
-  try {
-    const listings = await Listing.find({ active: true }).sort({ createdAt: -1 });
-    res.json({ success: true, listings });
-  } catch (e) {
-    console.error(e);
     res.status(500).json({ error: e.message });
   }
 });
 
-// حذف الإعلان
-app.post('/api/delete-listing', async (req, res) => {
+/* جلب الإعلانات (مفتوح) */
+app.get('/api/get-listings', async (req, res) => {
+  try {
+    const listings = await Listing.find({ active: true })
+      .sort({ createdAt: -1 });
+    res.json({ success: true, listings });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* حذف إعلان (محمي) */
+app.post('/api/delete-listing', verifyPiToken, async (req, res) => {
   const { listingId, piUid } = req.body;
-  if (!listingId || !piUid) return res.status(400).json({ error: 'listingId and piUid required' });
+  if (!listingId || !piUid)
+    return res.status(400).json({ error: 'listingId and piUid required' });
 
   try {
     const listing = await Listing.findOne({ _id: listingId, sellerUid: piUid });
-    if (!listing) return res.status(404).json({ error: 'Listing not found or not owned by you' });
+    if (!listing)
+      return res.status(404).json({ error: 'Listing not found or not owned by you' });
 
     await Listing.deleteOne({ _id: listingId });
     res.json({ success: true });
   } catch (e) {
-    console.error(e);
     res.status(500).json({ error: e.message });
   }
 });
 
-app.get('/', (req, res) => res.send('<h1>CexPi Backend - Running</h1>'));
+/* Root */
+app.get('/', (req, res) => {
+  res.send('<h1>CexPi Backend - Running</h1>');
+});
 
+/* Start Server */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
-
-
