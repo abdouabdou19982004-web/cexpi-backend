@@ -1,3 +1,5 @@
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -165,3 +167,4 @@ app.get('/', (req, res) => res.send('<h1>CexPi Backend - Running</h1>'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
