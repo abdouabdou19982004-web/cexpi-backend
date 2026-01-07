@@ -43,6 +43,7 @@ const UserSchema = new mongoose.Schema({
   piUid: { type: String, required: true, unique: true },
   piUsername: { type: String, required: true },
   country: { type: String, required: true },
+   listingCredits: { type: Number, default: 0 }, // ⭐ عدد الإعلانات المدفوعة
   createdAt: { type: Date, default: Date.now }
 });
 const User = mongoose.model('User', UserSchema);
@@ -114,41 +115,114 @@ app.post('/api/approve-payment', verifyPiToken, async (req, res) => {
 
 /* إكمال الدفع */
 app.post('/api/complete-payment', verifyPiToken, async (req, res) => {
+
   const { paymentId, txid } = req.body;
+  const piUid = req.user.uid;
+
   if (!paymentId || !txid)
     return res.status(400).json({ error: 'paymentId and txid required' });
 
   try {
-    await axios.post(`https://api.minepi.com/v2/payments/${paymentId}/complete`, { txid }, {
-      headers: { Authorization: `Key ${process.env.PI_API_KEY}` }
+    // إكمال الدفع مع Pi
+    await axios.post(
+      `https://api.minepi.com/v2/payments/${paymentId}/complete`,
+      { txid },
+      { headers: { Authorization: `Key ${process.env.PI_API_KEY}` } }
+    );
+
+    // ✅ إضافة رصيد إعلان واحد فقط
+    const user = await User.findOneAndUpdate(
+      { piUid },
+      { $inc: { listingCredits: 1 } },
+      { new: true }
+    );
+
+    if (!user)
+      return res.status(404).json({ error: 'User not found' });
+
+    res.json({
+      success: true,
+      credits: user.listingCredits
     });
-    res.json({ success: true });
+
   } catch (e) {
     res.status(500).json({ error: e.response?.data || e.message });
   }
 });
 
+
 /* نشر إعلان */
 app.post('/api/complete-listing', verifyPiToken, async (req, res) => {
-  const piUid = req.user.uid;
-  const { title, description, priceInPi, category, make, model, year, mileage, country, region, images, phoneNumber } = req.body;
 
-  if (!piUid || !title || !description || !priceInPi || !category || !country || !region || !phoneNumber)
+  const piUid = req.user.uid;
+
+  const {
+    title,
+    description,
+    priceInPi,
+    category,
+    make,
+    model,
+    year,
+    mileage,
+    country,
+    region,
+    images,
+    phoneNumber
+  } = req.body;
+
+  if (!title || !description || !priceInPi || !category || !country || !region || !phoneNumber) {
     return res.status(400).json({ error: 'Missing required fields' });
+  }
 
   try {
+    // 🔐 جلب المستخدم
+    const user = await User.findOne({ piUid });
+
+    if (!user)
+      return res.status(404).json({ error: 'User not found' });
+
+    // ⛔ لا يوجد رصيد
+    if (user.listingCredits <= 0) {
+      return res.status(403).json({
+        error: 'No listing credits available. Please make a payment.'
+      });
+    }
+
+    // ✅ إنشاء الإعلان
     const newListing = new Listing({
       sellerUid: piUid,
-      title, description, priceInPi, category,
-      make: make || '', model: model || '', year: year || null, mileage: mileage || null,
-      country, region, images: images || [], phoneNumber
+      title,
+      description,
+      priceInPi,
+      category,
+      make: make || '',
+      model: model || '',
+      year: year || null,
+      mileage: mileage || null,
+      country,
+      region,
+      images: images || [],
+      phoneNumber
     });
+
     await newListing.save();
-    res.json({ success: true, message: 'Listing published successfully!' });
+
+    // ⭐ خصم رصيد إعلان واحد
+    user.listingCredits -= 1;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Listing published successfully',
+      remainingCredits: user.listingCredits
+    });
+
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
+
 
 /* جلب الإعلانات */
 app.get('/api/get-listings', async (req, res) => {
@@ -194,3 +268,4 @@ setInterval(async () => {
 /* Start Server */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
