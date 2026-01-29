@@ -25,8 +25,10 @@ const UserSchema = new mongoose.Schema({
   piUid: { type: String, required: true, unique: true },
   piUsername: { type: String, required: true },
   country: { type: String, required: true },
+  welcomeRewardSent: { type: Boolean, default: false }, // ✅ هذا السطر الجديد
   createdAt: { type: Date, default: Date.now }
 });
+
 const User = mongoose.model('User', UserSchema);
 
 // نموذج الإعلان
@@ -169,9 +171,63 @@ app.post('/api/delete-listing', async (req, res) => {
   }
 });
 
+
+// إرسال 0.1 Pi كمكافأة ترحيبية
+app.post('/api/send-welcome-pi', async (req, res) => {
+  const { piUid } = req.body;
+
+  if (!piUid) return res.status(400).json({ error: 'piUid required' });
+
+  try {
+    const user = await User.findOne({ piUid });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.welcomeRewardSent) return res.json({ message: 'Already received reward' });
+
+    // 1️⃣ إنشاء الدفع
+    const create = await axios.post(
+      'https://api.minepi.com/v2/payments',
+      {
+        amount: 0.1,
+        recipient: piUid,
+        memo: '🎁 Welcome Bonus',
+        metadata: { type: 'welcome_reward' }
+      },
+      { headers: { Authorization: `Key ${process.env.PI_API_KEY}` } }
+    );
+
+    const paymentId = create.data.identifier;
+
+    // 2️⃣ الموافقة على الدفع
+    await axios.post(
+      `https://api.minepi.com/v2/payments/${paymentId}/approve`,
+      {},
+      { headers: { Authorization: `Key ${process.env.PI_API_KEY}` } }
+    );
+
+    // 3️⃣ إكمال الدفع
+    await axios.post(
+      `https://api.minepi.com/v2/payments/${paymentId}/complete`,
+      {},
+      { headers: { Authorization: `Key ${process.env.PI_API_KEY}` } }
+    );
+
+    // 4️⃣ تحديث المستخدم
+    user.welcomeRewardSent = true;
+    await user.save();
+
+    res.json({ success: true, message: 'Welcome bonus sent!' });
+  } catch (err) {
+    console.error(err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to send reward' });
+  }
+});
+
+
+
 app.get('/', (req, res) => res.send('<h1>CexPi Backend - Running</h1>'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
 
 
