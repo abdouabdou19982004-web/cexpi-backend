@@ -181,7 +181,6 @@ app.post('/api/send-welcome-pi', async (req, res) => {
   try {
     const user = await User.findOne({ piUid });
     if (!user) return res.status(404).json({ error: 'User not found' });
-    if (user.welcomeRewardSent) return res.json({ message: 'Already received reward' });
 
     // 1️⃣ إنشاء الدفع
     const create = await axios.post(
@@ -211,8 +210,8 @@ app.post('/api/send-welcome-pi', async (req, res) => {
       { headers: { Authorization: `Key ${process.env.PI_API_KEY}` } }
     );
 
-    // 4️⃣ تحديث المستخدم
-    user.welcomeRewardSent = true;
+    // 4️⃣ تسجيل آخر مرة تم فيها إرسال المكافأة (اختياري)
+    user.lastRewardSent = new Date();
     await user.save();
 
     res.json({ success: true, message: 'Welcome bonus sent!' });
@@ -228,6 +227,7 @@ app.get('/', (req, res) => res.send('<h1>CexPi Backend - Running</h1>'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
 
 
 
