@@ -13,7 +13,24 @@ app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100
 }));
-app.use(cors());
+const allowedOrigins = [
+  "https://abdouabdou19982004-web.github.io"
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // السماح للطلبات التي لا ترسل Origin (مثل بعض أدوات الاختبار)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error("CORS blocked"));
+  },
+  methods: ["GET", "POST"],
+  credentials: false
+}));
 app.use(express.json({ limit: '10mb' }));
 
 mongoose.connect(process.env.MONGODB_URI)
