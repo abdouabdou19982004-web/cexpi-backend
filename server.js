@@ -172,7 +172,128 @@ app.post('/api/delete-listing', async (req, res) => {
 });
 
 
+// ================= A2U PROMO WITHDRAWAL (First 5 Users) =================
+const PiNetwork = require('pi-backend').default;
+const piSDK = new PiNetwork(process.env.PI_API_KEY, process.env.PI_WALLET_SECRET);
 
+const PromoClaimSchema = new mongoose.Schema({
+  piUid: { type: String, required: true, unique: true },
+  piUsername: { type: String, required: true },
+  amount: { type: Number, default: 0.1 },
+  txid: { type: String },
+  paymentId: { type: String },
+  claimedAt: { type: Date, default: Date.now }
+});
+const PromoClaim = mongoose.model('PromoClaim', PromoClaimSchema);
+
+// تحقق من حالة المستخدم: هل يمكنه السحب؟
+app.post('/api/promo-status', async (req, res) => {
+  const { piUid } = req.body;
+  if (!piUid) return res.status(400).json({ error: 'piUid required' });
+
+  try {
+    const alreadyClaimed = await PromoClaim.findOne({ piUid });
+    const totalClaims = await PromoClaim.countDocuments();
+
+    res.json({
+      success: true,
+      alreadyClaimed: !!alreadyClaimed,
+      slotsLeft: Math.max(0, 5 - totalClaims),
+      isEligible: !alreadyClaimed && totalClaims < 5
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// طلب السحب A2U
+app.post('/api/claim-promo', async (req, res) => {
+  const { piUid, piUsername, accessToken } = req.body;
+  if (!piUid || !piUsername || !accessToken) {
+    return res.status(400).json({ error: 'Missing data' });
+  }
+
+  try {
+    // 1. التحقق من صحة المستخدم عبر Pi API
+    const verifyRes = await axios.get('https://api.minepi.com/v2/me', {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (verifyRes.data.uid !== piUid) {
+      return res.status(403).json({ error: 'User mismatch' });
+    }
+
+    // 2. تحقق إن كان قد سحب من قبل
+    const alreadyClaimed = await PromoClaim.findOne({ piUid });
+    if (alreadyClaimed) {
+      return res.status(400).json({ error: 'You have already claimed this reward' });
+    }
+
+    // 3. تحقق من عدد السحوبات الكلي (أول 5 فقط)
+    const totalClaims = await PromoClaim.countDocuments();
+    if (totalClaims >= 5) {
+      return res.status(400).json({ error: 'Promo limit reached. No slots left.' });
+    }
+
+    // 4. حجز السلوت فوراً لمنع التسابق (race condition) بين عدة طلبات متزامنة
+    let reservation;
+    try {
+      reservation = await PromoClaim.create({
+        piUid,
+        piUsername,
+        amount: 0.1,
+        txid: null,
+        paymentId: null
+      });
+    } catch (dupErr) {
+      return res.status(400).json({ error: 'You have already claimed this reward' });
+    }
+
+    // إعادة التحقق من العدد بعد الحجز (تحسباً لتزامن نادر)
+    const recountAfterReserve = await PromoClaim.countDocuments();
+    if (recountAfterReserve > 5) {
+      await PromoClaim.deleteOne({ _id: reservation._id });
+      return res.status(400).json({ error: 'Promo limit reached. No slots left.' });
+    }
+
+    // 5. تنفيذ دفعة A2U فعلية
+    let paymentId = null;
+    try {
+      paymentId = await piSDK.createPayment({
+        amount: 0.1,
+        memo: "CexPi - Early Adopter Reward",
+        metadata: { type: "promo_reward", piUid, piUsername },
+        uid: piUid
+      });
+
+      const txid = await piSDK.submitPayment(paymentId);
+      const completed = await piSDK.completePayment(paymentId, txid);
+
+      reservation.txid = txid;
+      reservation.paymentId = paymentId;
+      await reservation.save();
+
+      return res.json({
+        success: true,
+        amount: 0.1,
+        txid,
+        status: completed.status
+      });
+
+    } catch (payErr) {
+      // فشل الدفع → نلغي الحجز حتى لا نخسر سلوت بدون داعٍ
+      console.error('A2U payment error:', payErr.message);
+      await PromoClaim.deleteOne({ _id: reservation._id });
+      if (paymentId) {
+        try { await piSDK.cancelPayment(paymentId); } catch (ce) {}
+      }
+      return res.status(500).json({ error: 'Payment failed. Please try again.' });
+    }
+
+  } catch (e) {
+    console.error('Claim promo error:', e.response?.data || e.message);
+    res.status(500).json({ error: e.response?.data || e.message });
+  }
+});
 
 
 app.get('/', (req, res) => res.send('<h1>CexPi Backend - Running</h1>'));
