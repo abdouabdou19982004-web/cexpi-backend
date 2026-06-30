@@ -194,7 +194,7 @@ const PiNetwork = require('pi-backend').default;
 const piSDK = new PiNetwork(process.env.PI_API_KEY, process.env.PI_WALLET_SECRET);
 
 const PromoClaimSchema = new mongoose.Schema({
-  piUid: { type: String, required: true },
+  piUid: { type: String, required: true, unique: true },
   piUsername: { type: String, required: true },
   amount: { type: Number, default: 0.1 },
   txid: { type: String },
@@ -209,12 +209,15 @@ app.post('/api/promo-status', async (req, res) => {
   if (!piUid) return res.status(400).json({ error: 'piUid required' });
 
   try {
+    const alreadyClaimed = await PromoClaim.findOne({ piUid });
+    const totalClaims = await PromoClaim.countDocuments();
+
     res.json({
-  success: true,
-  alreadyClaimed: false,
-  slotsLeft: 999999,
-  isEligible: true
-});
+      success: true,
+      alreadyClaimed: !!alreadyClaimed,
+      slotsLeft: Math.max(0, 5 - totalClaims),
+      isEligible: !alreadyClaimed && totalClaims < 5
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -237,21 +240,37 @@ app.post('/api/claim-promo', async (req, res) => {
     }
 
     // 2. تحقق إن كان قد سحب من قبل
-    
+    const alreadyClaimed = await PromoClaim.findOne({ piUid });
+    if (alreadyClaimed) {
+      return res.status(400).json({ error: 'You have already claimed this reward' });
+    }
 
     // 3. تحقق من عدد السحوبات الكلي (أول 5 فقط)
-   
+    const totalClaims = await PromoClaim.countDocuments();
+    if (totalClaims >= 5) {
+      return res.status(400).json({ error: 'Promo limit reached. No slots left.' });
+    }
 
     // 4. حجز السلوت فوراً لمنع التسابق (race condition) بين عدة طلبات متزامنة
-    const reservation = await PromoClaim.create({
-  piUid,
-  piUsername,
-  amount: 0.1,
-  txid: null,
-  paymentId: null
-});
+    let reservation;
+    try {
+      reservation = await PromoClaim.create({
+        piUid,
+        piUsername,
+        amount: 0.1,
+        txid: null,
+        paymentId: null
+      });
+    } catch (dupErr) {
+      return res.status(400).json({ error: 'You have already claimed this reward' });
+    }
+
     // إعادة التحقق من العدد بعد الحجز (تحسباً لتزامن نادر)
-    
+    const recountAfterReserve = await PromoClaim.countDocuments();
+    if (recountAfterReserve > 5) {
+      await PromoClaim.deleteOne({ _id: reservation._id });
+      return res.status(400).json({ error: 'Promo limit reached. No slots left.' });
+    }
 
     // 5. تنفيذ دفعة A2U فعلية
     let paymentId = null;
@@ -298,7 +317,6 @@ app.get('/', (req, res) => res.send('<h1>CexPi Backend - Running</h1>'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
 
 
 
