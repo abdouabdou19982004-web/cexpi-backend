@@ -5,7 +5,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const axios = require('axios');
-
+const crypto = require('crypto');
 const app = express();
 app.use(helmet());
 
@@ -15,6 +15,25 @@ app.use(rateLimit({
 }));
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+// ================= VERIFY PI TOKEN =================
+async function verifyPiUser(accessToken, expectedUid) {
+  const response = await axios.get(
+    "https://api.minepi.com/v2/me",
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    }
+  );
+
+  if (response.data.uid !== expectedUid) {
+    throw new Error("Invalid Pi user");
+  }
+
+  return response.data;
+}
+
 
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('✅ Connected to MongoDB successfully'))
@@ -53,7 +72,17 @@ const Listing = mongoose.model('Listing', ListingSchema);
 
 // تسجيل المستخدم
 app.post('/api/register-user', async (req, res) => {
-  const { piUid, piUsername, country } = req.body;
+  const { piUid, piUsername, country, accessToken } = req.body;
+
+  if (!accessToken)
+  return res.status(401).json({ error: "Missing access token" });
+
+try {
+  await verifyPiUser(accessToken, piUid);
+} catch {
+  return res.status(401).json({ error: "Unauthorized" });
+}
+  
   if (!piUid || !piUsername || !country) return res.status(400).json({ error: 'Missing fields' });
 
   try {
@@ -67,7 +96,15 @@ app.post('/api/register-user', async (req, res) => {
 
 // إنشاء طلب دفع
 app.post('/api/create-listing-payment', async (req, res) => {
-  const { piUid } = req.body;
+  const { piUid, accessToken } = req.body;
+  if (!accessToken)
+  return res.status(401).json({ error: "Missing access token" });
+
+try {
+  await verifyPiUser(accessToken, piUid);
+} catch {
+  return res.status(401).json({ error: "Unauthorized" });
+}
   if (!piUid) return res.status(400).json({ error: 'piUid required' });
 
   res.json({
@@ -112,7 +149,31 @@ app.post('/api/complete-payment', async (req, res) => {
 
 // نشر الإعلان
 app.post('/api/complete-listing', async (req, res) => {
-  const { piUid, title, description, priceInPi, category, make, model, year, mileage, country, region, images, phoneNumber } = req.body;
+  const {
+  piUid,
+  accessToken,
+  title,
+  description,
+  priceInPi,
+  category,
+  make,
+  model,
+  year,
+  mileage,
+  country,
+  region,
+  images,
+  phoneNumber
+} = req.body;
+
+  if (!accessToken)
+  return res.status(401).json({ error: "Missing access token" });
+
+try {
+  await verifyPiUser(accessToken, piUid);
+} catch {
+  return res.status(401).json({ error: "Unauthorized" });
+}
 
   if (!piUid || !title || !description || !priceInPi || !category || !country || !region || !phoneNumber) {
     return res.status(400).json({ error: 'Missing required fields' });
@@ -156,7 +217,15 @@ app.get('/api/get-listings', async (req, res) => {
 
 // حذف الإعلان
 app.post('/api/delete-listing', async (req, res) => {
-  const { listingId, piUid } = req.body;
+  const { listingId, piUid, accessToken } = req.body;
+  if (!accessToken)
+  return res.status(401).json({ error: "Missing access token" });
+
+try {
+  await verifyPiUser(accessToken, piUid);
+} catch {
+  return res.status(401).json({ error: "Unauthorized" });
+}
   if (!listingId || !piUid) return res.status(400).json({ error: 'listingId and piUid required' });
 
   try {
